@@ -1,13 +1,105 @@
 import axios from 'axios'
 
-// In dev: proxied via vite to localhost:8000
-// In prod: set VITE_API_URL to your Railway backend URL
-const BASE = import.meta.env.VITE_API_URL || '/api'
+// ── Environment detection ─────────────────────────────────────────────
+// Electron production serves from file:// — must use direct IP
+const isElectronProd = window.location.protocol === 'file:'
 
+const BASE = isElectronProd
+  ? 'http://127.0.0'
+  : (import.meta.env.VITE_API_URL || '/api')
+
+// ── Token storage helpers ─────────────────────────────────────────────
+const TOKEN_KEY   = 'cropdoc_access_token'
+const REFRESH_KEY = 'cropdoc_refresh_token'
+const USER_KEY    = 'cropdoc_user'
+
+export const saveAuth = (accessToken, refreshToken, user) => {
+  localStorage.setItem(TOKEN_KEY,   accessToken);
+  localStorage.setItem(REFRESH_KEY, refreshToken  || '');
+  localStorage.setItem(USER_KEY,    JSON.stringify(user));
+};
+
+export const getToken        = () => localStorage.getItem(TOKEN_KEY)
+export const getRefreshToken = () => localStorage.getItem(REFRESH_KEY)
+export const getUser = () => {
+  const u = localStorage.getItem(USER_KEY)
+  
+  // 1. Basic null/undefined check
+  if (!u || u === "undefined" || u === "null") return null
+  
+  try {
+    const parsed = JSON.parse(u)
+    
+    // 2. Ensure it's a real object and actually has data (like an ID)
+    // If it's an empty object {}, return null so the Login screen shows
+    if (parsed && typeof parsed === 'object' && (parsed.id || Object.keys(parsed).length > 0)) {
+      return parsed
+    }
+    
+    return null
+  } catch (e) {
+    console.error("Failed to parse user from storage", e)
+    return null
+  }
+}
+
+export const isLoggedIn = () => !!getToken()
+export const logout     = () => {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+  localStorage.removeItem(USER_KEY)
+}
+
+// ── Axios instance ────────────────────────────────────────────────────
 export const api = axios.create({
   baseURL: BASE,
-  timeout: 30000, // 30s — model inference can be slow on CPU
+  timeout: 30000,
 })
+
+// Attach JWT to every request if available
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY); // Ensure key matches saveAuth
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => Promise.reject(error));
+
+export default api;
+
+// Auto-refresh on 401 — then retry original request
+api.interceptors.response.use(
+  res => res,
+  async err => {
+    const original = err.config
+
+    if (
+      err.response?.status === 401
+      && getRefreshToken()
+      && !original._retry
+    ) {
+      original._retry = true
+      try {
+        const { data } = await axios.post(`${BASE}/refresh`, {
+          refresh_token: getRefreshToken()
+        })
+        localStorage.setItem(TOKEN_KEY,   data.access_token)
+        localStorage.setItem(REFRESH_KEY, data.refresh_token)
+        original.headers.Authorization = `Bearer ${data.access_token}`
+        return api(original)
+      } catch {
+        logout()
+        window.location.href = '/'
+      }
+    }
+
+    return Promise.reject(err)
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════════════
+//  EXISTING FUNCTIONS — UNCHANGED
+// ═══════════════════════════════════════════════════════════════════════
 
 export const predictDisease = async (imageFile) => {
   const form = new FormData()
@@ -18,12 +110,50 @@ export const predictDisease = async (imageFile) => {
   return data
 }
 
-export const speakText = (text, lang = 'te') => {
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/speak?text=${encodeURIComponent(text)}&lang=${lang}`
-}
+export const speakText = (text, lang = 'te') =>
+  `${BASE}/speak?text=${encodeURIComponent(text)}&lang=${lang}`
 
 export const checkHealth = async () => {
   const { data } = await api.get('/health')
   return data
 }
+
+export const getLiveWeather = async (lat, lon) => {
+  const { data } = await api.get(`/weather?lat=${lat}&lon=${lon}`)
+  return data
+}
+
+export const getMarketPrices = async (commodity = '', state = '') => {
+  try {
+    const url = `/market-prices?limit=100`
+      + (commodity ? `&commodity=${commodity}` : '')
+      + (state     ? `&state=${state}`         : '')
+    const { data } = await api.get(url)
+    return data
+  } catch (error) {
+    console.error("Error fetching market data:", error)
+    throw error
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  NEW AUTH FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════
+
+export const registerUser  = async (data) =>
+  (await api.post('/register', data)).data
+
+export const loginUser     = async (data) =>
+  (await api.post('/login', data)).data
+
+export const getMe         = async () =>
+  (await api.get('/me')).data
+
+export const updateProfile = async (data) =>
+  (await api.put('/me', data)).data
+
+export const getHistory    = async (limit = 20) =>
+  (await api.get(`/history?limit=${limit}`)).data
+
+export const deleteHistory = async (id) =>
+  (await api.delete(`/history/${id}`)).data

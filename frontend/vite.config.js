@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // CRITICAL: This ensures all asset paths are relative (./) instead of absolute (/)
+  // Without this, the Electron app will show a blank white screen.
+  base: './', 
+  
   plugins: [
     react(),
     VitePWA({
@@ -16,39 +20,46 @@ export default defineConfig({
         background_color: '#f0fdf4',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        // Changed to '.' for local file compatibility
+        start_url: '.', 
         icons: [
           {
-            src: '/icon-192.png',
+            src: 'icon-192.png', // Removed leading slash
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: '/icon-512.png',
+            src: 'icon-512.png', // Removed leading slash
             sizes: '512x512',
             type: 'image/png'
           }
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        cleanupOutdatedCaches: true,
-        sourcemap: false
+        globIgnores: [
+          '**/win-unpacked/**', 
+          '**/resources/**', 
+        ]
       },
       devOptions: {
-        enabled: false   // disable PWA in dev to avoid confusion
+        enabled: false
       }
     })
   ],
   server: {
-    host: '0.0.0.0',    // allows phone access on same WiFi
+    host: '0.0.0.0',
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         rewrite: path => path.replace(/^\/api/, '')
       }
     }
+  },
+  // Added to ensure build output is clean and compatible
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
   }
 })
