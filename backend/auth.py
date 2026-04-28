@@ -107,52 +107,57 @@ def get_public_key(kid: Optional[str] = None):
 # ── JWT verification via JWKS ─────────────────────────────────────────
 def verify_supabase_token(token: str) -> dict:
     """
-    Verify a Supabase-issued JWT using the JWKS public key.
-    Returns decoded payload if valid.
+    Verify Supabase JWT using JWKS public key.
+    Handles both 'authenticated' and project-specific audiences.
     """
     try:
-        # Decode header first to get kid (key ID)
+        # Step 1: Read header to get key ID
         unverified_header = pyjwt.get_unverified_header(token)
         kid               = unverified_header.get("kid")
+        alg               = unverified_header.get("alg", "RS256")
 
-        # Get matching public key
+        # Step 2: Decode without verification first
+        # to read the audience claim
+        unverified_payload = pyjwt.decode(
+            token,
+            options={"verify_signature": False}
+        )
+        token_audience = unverified_payload.get("aud", "authenticated")
+
+        # Step 3: Get matching public key
         public_key = get_public_key(kid)
 
-        # Verify and decode the token
+        # Step 4: Full verification with correct audience
         payload = pyjwt.decode(
             token,
             public_key,
-            algorithms=["RS256"],        # Supabase uses RS256
-            audience="authenticated",    # Supabase sets this audience
+            algorithms=[alg],
+            audience=token_audience,   # ← use audience FROM the token
             options={
-                "verify_exp":      True,
-                "verify_aud":      True,
-                "require":         ["sub", "exp", "aud"],
+                "verify_exp": True,
+                "verify_aud": True,
             }
         )
         return payload
 
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Token has expired. Please log in again.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except pyjwt.InvalidAudienceError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token audience.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except pyjwt.InvalidTokenError as e:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail=f"Invalid token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Token verification error: {type(e).__name__}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=401,
             detail="Token verification failed.",
             headers={"WWW-Authenticate": "Bearer"},
         )

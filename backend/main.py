@@ -1,7 +1,27 @@
+import os
 import sys
 import io
-import os
 import json
+from dotenv import load_dotenv
+
+if getattr(sys, 'frozen', False):
+    # If running as an EXE (packaged)
+    basedir = os.path.dirname(sys.executable)
+else:
+    # If running as a script (dev)
+    basedir = os.path.dirname(os.path.abspath(__file__))
+
+env_path = os.path.join(basedir, '.env')
+load_dotenv(env_path)
+
+# Now check if they loaded correctly
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print(f"❌ CRITICAL ERROR: Supabase credentials missing at {env_path}")
+    # Don't let it crash silently; exit so you see the error
+    sys.exit(1)
 
 # 1. Force UTF-8 encoding for Windows consoles
 if sys.platform == "win32":
@@ -19,8 +39,10 @@ def resource_path(relative_path):
 # 3. Environment
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status
+from fastapi.security import HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
+from supabase import create_client, Client
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -30,6 +52,8 @@ from PIL import Image
 from gtts import gTTS
 import requests
 import uvicorn
+from jose import jwt
+
 
 # ── Load .env (only in dev — ignored if not present) ─────────────────
 try:
@@ -44,7 +68,7 @@ try:
     from auth     import (
         RegisterRequest, LoginRequest,
         register_user, login_user, refresh_token,
-        get_current_user, get_optional_user,
+        get_optional_user,
     )
     from database import get_db
     AUTH_ENABLED = True
@@ -62,17 +86,61 @@ except Exception as e:
     class LoginRequest(BaseModel):
         email: str; password: str
 
-    async def get_current_user():
-        raise HTTPException(503, "Auth not configured.")
+bearer_scheme = HTTPBearer()
+JWKS_URL = "https://iachrjbkhgqvrvfntxwh.supabase.co/auth/v1/.well-known/jwks.json"
 
-    async def get_optional_user():
+def get_remote_keys():
+    try:
+        response = requests.get(JWKS_URL)
+        return response.json()
+    except Exception as e:
+        print(f"❌ Failed to fetch JWKS: {e}")
         return None
-
-    def get_db():
-        return None
+   
+async def get_current_user(credentials = Depends(bearer_scheme)):
+    token = credentials.credentials
+    try:
+        # Fetch the keys from the URL first
+        jwks = get_remote_keys()
+        
+        # Decode using the keys from the JSON response
+        payload = jwt.decode(
+            token, 
+            jwks, # Pass the JSON keys here, not the URL string
+            algorithms=['ES256'], 
+            options={"verify_aud": False}
+        )
+        return payload
+    except Exception as e:
+        print(f"❌ Auth Error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token verification failed."
+        )
+async def get_optional_user():
+    return None
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
+def get_db():
+    return supabase
 
 # ── FastAPI app ───────────────────────────────────────────────────────
 app = FastAPI(title="CropDoc AI API", version="2.0")
+# Add this after app = FastAPI(...) in main.py
+
+@app.on_event("startup")
+async def startup_checks():
+    if AUTH_ENABLED:
+        try:
+            from auth import get_jwks
+            jwks = get_jwks()
+            key_count = len(jwks.get("keys", []))
+            print(f"✅ JWKS loaded successfully — {key_count} key(s)")
+        except Exception as e:
+            print(f"⚠️  JWKS fetch failed on startup: {e}")
+            print("    History and protected routes will not work.")
+            print(f"    Check SUPABASE_JWKS_URL in your .env file")
 
 app.add_middleware(
     CORSMiddleware,
@@ -317,8 +385,8 @@ async def get_market_prices(
 @app.post("/predict")
 async def predict(
     file: UploadFile = File(...),
-    # optional auth — works with or without login
-    current_user: Optional[dict] = Depends(get_optional_user) if AUTH_ENABLED else None,
+    # Change: using get_current_user ensures we get the decoded JWKS payload
+    current_user: Optional[dict] = Depends(get_current_user) if AUTH_ENABLED else None,
 ):
     if MODEL is None:
         raise HTTPException(503, "Model not loaded")
@@ -375,8 +443,9 @@ async def predict(
                 "Pepper" if "pepper" in class_name.lower() else
                 "Unknown"
             )
+            # FIX: Changed ["id"] to ["sub"] to match Supabase JWT structure
             db.table("predictions").insert({
-                "user_id":          current_user["id"],
+                "user_id":          current_user["sub"], 
                 "disease_name":     class_name,
                 "display_name":     treatment["title"],
                 "confidence":       round(confidence, 2),
@@ -384,7 +453,7 @@ async def predict(
                 "crop_type":        crop,
                 "pesticide":        treatment["pesticide"],
                 "fertilizer":       treatment["fertilizer"],
-                "location_village": current_user.get("village"),
+                "location_village": current_user.get("user_metadata", {}).get("village") or current_user.get("village"),
             }).execute()
             response["saved_to_history"] = True
         except Exception as e:
@@ -475,7 +544,7 @@ if AUTH_ENABLED:
         db     = get_db()
         result = db.table("predictions") \
                    .select("*") \
-                   .eq("user_id", current_user["id"]) \
+                   .eq("user_id", current_user["sub"]) \
                    .order("created_at", desc=True) \
                    .limit(limit) \
                    .execute()
@@ -494,7 +563,23 @@ if AUTH_ENABLED:
           .eq("user_id", current_user["id"]) \
           .execute()
         return {"message": "Deleted."}
-
+    @app.get("/debug-token")
+    async def debug_token(credentials = Depends(bearer_scheme)):
+        if not credentials:
+            return {"error": "No token"}
+        try:
+            # Decode WITHOUT verification to see what's inside
+            import jwt as pyjwt
+            unverified = pyjwt.decode(
+                credentials.credentials,
+                options={"verify_signature": False}
+                )
+            return {
+                "payload": unverified,
+                "header":  pyjwt.get_unverified_header(credentials.credentials)
+                }
+        except Exception as e:
+            return {"error": str(e)}
     @app.get("/jwks-test")
     async def test_jwks():
         """Verify JWKS is reachable — dev diagnostic endpoint."""

@@ -30,6 +30,10 @@
         "from": "bin/main.exe",
         "to": "backend/main.exe",
         "filter": ["**/*"]
+       },
+       {
+        "from": "bin/.env",
+        "to": "backend/.env"
       }
     ],
     "directories": {

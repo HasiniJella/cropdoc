@@ -1,11 +1,11 @@
 import axios from 'axios'
 
 // ── Environment detection ─────────────────────────────────────────────
-// Electron production serves from file:// — must use direct IP
 const isElectronProd = window.location.protocol === 'file:'
 
+// FIX: Added missing port and full IP for Electron production
 const BASE = isElectronProd
-  ? 'http://127.0.0'
+  ? 'http://127.0.0.1:8000' 
   : (import.meta.env.VITE_API_URL || '/api')
 
 // ── Token storage helpers ─────────────────────────────────────────────
@@ -23,19 +23,12 @@ export const getToken        = () => localStorage.getItem(TOKEN_KEY)
 export const getRefreshToken = () => localStorage.getItem(REFRESH_KEY)
 export const getUser = () => {
   const u = localStorage.getItem(USER_KEY)
-  
-  // 1. Basic null/undefined check
   if (!u || u === "undefined" || u === "null") return null
-  
   try {
     const parsed = JSON.parse(u)
-    
-    // 2. Ensure it's a real object and actually has data (like an ID)
-    // If it's an empty object {}, return null so the Login screen shows
     if (parsed && typeof parsed === 'object' && (parsed.id || Object.keys(parsed).length > 0)) {
       return parsed
     }
-    
     return null
   } catch (e) {
     console.error("Failed to parse user from storage", e)
@@ -58,26 +51,19 @@ export const api = axios.create({
 
 // Attach JWT to every request if available
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY); // Ensure key matches saveAuth
+  const token = getToken(); 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 }, (error) => Promise.reject(error));
 
-export default api;
-
 // Auto-refresh on 401 — then retry original request
 api.interceptors.response.use(
   res => res,
   async err => {
     const original = err.config
-
-    if (
-      err.response?.status === 401
-      && getRefreshToken()
-      && !original._retry
-    ) {
+    if (err.response?.status === 401 && getRefreshToken() && !original._retry) {
       original._retry = true
       try {
         const { data } = await axios.post(`${BASE}/refresh`, {
@@ -92,13 +78,12 @@ api.interceptors.response.use(
         window.location.href = '/'
       }
     }
-
     return Promise.reject(err)
   }
 )
 
 // ═══════════════════════════════════════════════════════════════════════
-//  EXISTING FUNCTIONS — UNCHANGED
+//  API FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════
 
 export const predictDisease = async (imageFile) => {
@@ -125,9 +110,7 @@ export const getLiveWeather = async (lat, lon) => {
 
 export const getMarketPrices = async (commodity = '', state = '') => {
   try {
-    const url = `/market-prices?limit=100`
-      + (commodity ? `&commodity=${commodity}` : '')
-      + (state     ? `&state=${state}`         : '')
+    const url = `/market-prices?limit=100` + (commodity ? `&commodity=${commodity}` : '') + (state ? `&state=${state}` : '')
     const { data } = await api.get(url)
     return data
   } catch (error) {
@@ -136,24 +119,12 @@ export const getMarketPrices = async (commodity = '', state = '') => {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  NEW AUTH FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════════
+export const registerUser  = async (data) => (await api.post('/register', data)).data
+export const loginUser     = async (data) => (await api.post('/login', data)).data
+export const getMe         = async () => (await api.get('/me')).data
+export const updateProfile = async (data) => (await api.put('/me', data)).data
+export const getHistory    = async (limit = 20) => (await api.get(`/history?limit=${limit}`)).data
+export const deleteHistory = async (id) => (await api.delete(`/history/${id}`)).data
 
-export const registerUser  = async (data) =>
-  (await api.post('/register', data)).data
-
-export const loginUser     = async (data) =>
-  (await api.post('/login', data)).data
-
-export const getMe         = async () =>
-  (await api.get('/me')).data
-
-export const updateProfile = async (data) =>
-  (await api.put('/me', data)).data
-
-export const getHistory    = async (limit = 20) =>
-  (await api.get(`/history?limit=${limit}`)).data
-
-export const deleteHistory = async (id) =>
-  (await api.delete(`/history/${id}`)).data
+// ONLY ONE DEFAULT EXPORT AT THE VERY BOTTOM
+export default api;

@@ -38,10 +38,25 @@ export default function App() {
   console.log("LocalStorage User:", localStorage.getItem('cropdoc_user'));
 
   useEffect(() => {
-    checkHealth()
-      .then(() => setOnline(true))
-      .catch(() => setOnline(false))
-  }, [])
+  const verifyBackend = async () => {
+    try {
+      await checkHealth();
+      setOnline(true);
+    } catch (e) {
+      // If it fails, wait 3 seconds and try one more time
+      setTimeout(async () => {
+        try {
+          await checkHealth();
+          setOnline(true);
+        } catch (err) {
+          setOnline(false);
+        }
+      }, 3000);
+    }
+  };
+  verifyBackend();
+}, []);
+
 
   const handleAuthSuccess = (userData) => {
     console.log('Auth success, user:', userData)

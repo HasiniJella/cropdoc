@@ -75,14 +75,21 @@ export default function Auth({ onAuthSuccess }) {
     if (!email || !password) { setError('Please fill in all fields.'); return }
     setLoading(true); setError('')
     try {
-      const res = await loginUser({ email, password })
-      saveAuth(res.access_token, res.refresh_token, res.user)
-      onAuthSuccess(res.user)
+        const res = await loginUser({ email, password })
+        console.log("Response from server:", res)
+
+    // Ensure these keys (access_token, user) match exactly what your Python backend sends
+        if (res.access_token) {
+            saveAuth(res.access_token, res.refresh_token, res.user)
+            onAuthSuccess(res.user)
+        } else {
+            setError("Login successful, but no token received.")
+        }
     } catch (e) {
-      setError(e.response?.data?.detail || 'Login failed. Check your credentials.')
+        setError(e.response?.data?.detail || 'Login failed.')
     }
     setLoading(false)
-  }
+}
 
   const handleRegister = async () => {
     if (!email || !password || !fullName) { setError('Please fill required fields.'); return }
