@@ -3,6 +3,7 @@ import sys
 import io
 import json
 from dotenv import load_dotenv
+from typing import Optional
 
 if getattr(sys, 'frozen', False):
     # If running as an EXE (packaged)
@@ -351,12 +352,76 @@ MARKET_API_KEY     = os.getenv(
     "579b464db66ec23bdd000001c67bccb742b442ca7791f3db9f440548"
 )
 
+import time   # ← make sure this is at the TOP of main.py with other imports
+
+# ── Market config ─────────────────────────────────────────────────────
+MARKET_RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
+MARKET_API_KEY     = os.getenv(
+    "MARKET_API_KEY",
+    "579b464db66ec23bdd000001c67bccb742b442ca7791f3db9f440548"
+)
+
+# ── In-memory cache ───────────────────────────────────────────────────
+_market_cache      = []
+_market_cache_time = 0.0
+CACHE_SECONDS      = 3600   # 1 hour
+
+# ── Fallback data ─────────────────────────────────────────────────────
+FALLBACK_MARKET_DATA = [
+    {"commodity":"Tomato",   "market":"Warangal APMC",   "state":"Telangana",
+     "min_price":"800",  "max_price":"2400", "modal_price":"1600", "variety":"Desi"},
+    {"commodity":"Potato",   "market":"Nizamabad APMC",  "state":"Telangana",
+     "min_price":"700",  "max_price":"1500", "modal_price":"1100", "variety":"Local"},
+    {"commodity":"Onion",    "market":"Karimnagar APMC", "state":"Telangana",
+     "min_price":"600",  "max_price":"2000", "modal_price":"1200", "variety":"Red"},
+    {"commodity":"Rice",     "market":"Warangal APMC",   "state":"Telangana",
+     "min_price":"1820", "max_price":"2180", "modal_price":"2050", "variety":"Sona"},
+    {"commodity":"Maize",    "market":"Khammam APMC",    "state":"Telangana",
+     "min_price":"1540", "max_price":"1880", "modal_price":"1720", "variety":"Hybrid"},
+    {"commodity":"Cotton",   "market":"Warangal APMC",   "state":"Telangana",
+     "min_price":"5900", "max_price":"6400", "modal_price":"6150", "variety":"Medium"},
+    {"commodity":"Chilli",   "market":"Khammam APMC",    "state":"Telangana",
+     "min_price":"9000", "max_price":"14500","modal_price":"11200","variety":"Teja"},
+    {"commodity":"Turmeric", "market":"Nizamabad APMC",  "state":"Telangana",
+     "min_price":"7000", "max_price":"12000","modal_price":"9500", "variety":"Finger"},
+    {"commodity":"Soybean",  "market":"Adilabad APMC",   "state":"Telangana",
+     "min_price":"3900", "max_price":"4450", "modal_price":"4200", "variety":"JS-335"},
+    {"commodity":"Groundnut","market":"Nalgonda APMC",   "state":"Telangana",
+     "min_price":"4500", "max_price":"5500", "modal_price":"5100", "variety":"TMV-2"},
+    {"commodity":"Wheat",    "market":"Hyderabad APMC",  "state":"Telangana",
+     "min_price":"2000", "max_price":"2400", "modal_price":"2200", "variety":"Lokwan"},
+    {"commodity":"Brinjal",  "market":"Warangal APMC",   "state":"Telangana",
+     "min_price":"400",  "max_price":"1200", "modal_price":"800",  "variety":"Local"},
+    {"commodity":"Capsicum", "market":"Hyderabad APMC",  "state":"Telangana",
+     "min_price":"1200", "max_price":"3500", "modal_price":"2200", "variety":"Green"},
+    {"commodity":"Cabbage",  "market":"Karimnagar APMC", "state":"Telangana",
+     "min_price":"300",  "max_price":"900",  "modal_price":"600",  "variety":"Local"},
+    {"commodity":"Banana",   "market":"Khammam APMC",    "state":"Telangana",
+     "min_price":"800",  "max_price":"1800", "modal_price":"1300", "variety":"Robusta"},
+]
+
 @app.get("/market-prices")
 async def get_market_prices(
-    commodity: str = None,
-    state:     str = None,
-    limit:     int = 100
+    commodity: Optional[str] = None,
+    state:     Optional[str] = None,
+    limit:     int           = 100,
 ):
+    global _market_cache, _market_cache_time
+
+    now = time.time()
+
+    # ── 1. Serve from cache if still fresh ────────────────────────────
+    if _market_cache and (now - _market_cache_time) < CACHE_SECONDS:
+        records = _market_cache
+        if commodity:
+            records = [r for r in records
+                       if commodity.lower() in r.get("commodity","").lower()]
+        if state:
+            records = [r for r in records
+                       if state.lower() in r.get("state","").lower()]
+        return {"records": records, "source": "cache", "count": len(records)}
+
+    # ── 2. Try live government API ────────────────────────────────────
     url = (
         f"https://api.data.gov.in/resource/{MARKET_RESOURCE_ID}"
         f"?api-key={MARKET_API_KEY}&format=json&limit={limit}"
@@ -367,20 +432,41 @@ async def get_market_prices(
         url += f"&filters[state]={state}"
 
     try:
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("records", [])
-        print(f"API Error: {response.status_code} - {response.text}")
-        raise HTTPException(
-            status_code=response.status_code,
-            detail="Failed to fetch Mandi data"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        response = requests.get(url, timeout=8)
+        response.raise_for_status()   # raises on 4xx/5xx
 
+        data    = response.json()
+        records = data.get("records", [])
+
+        if records:
+            # Update cache
+            _market_cache      = records
+            _market_cache_time = now
+            print(f"✅ Market live: {len(records)} records")
+            return {"records": records, "source": "live", "count": len(records)}
+
+        # API returned 200 but empty records — use fallback
+        raise ValueError("Empty records from API")
+
+    except Exception as e:
+        print(f"⚠️  Market API failed: {type(e).__name__}: {e}")
+        print("    Using fallback data")
+
+        # ── 3. Fallback ───────────────────────────────────────────────
+        records = FALLBACK_MARKET_DATA.copy()
+        if commodity:
+            records = [r for r in records
+                       if commodity.lower() in r.get("commodity","").lower()]
+        if state:
+            records = [r for r in records
+                       if state.lower() in r.get("state","").lower()]
+
+        return {
+            "records": records,
+            "source":  "fallback",
+            "count":   len(records),
+            "note":    "Government API unavailable. Showing reference prices.",
+        }
 # ── Predict ───────────────────────────────────────────────────────────
 @app.post("/predict")
 async def predict(
