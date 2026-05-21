@@ -9,7 +9,7 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![Supabase](https://img.shields.io/badge/Supabase-Auth-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)
 
-**An AI-powered Progressive Web App that detects crop diseases from leaf images, delivers treatment recommendations in Telugu, and provides real-time market prices and weather advisories — built for rural farmers in Telangana, India.**
+**An AI-powered Progressive Web App that detects crop diseases from leaf images, delivers treatment recommendations in Telugu, and provides real-time market prices and weather advisories, built for rural farmers in Telangana, India.**
 
 [Features](#-features) · [Demo](#-demo) · [Tech Stack](#-tech-stack) · [Installation](#-installation) · [API Docs](#-api-endpoints) · [ML Model](#-ml-model) · [Screenshots](#-screenshots)
 
@@ -19,7 +19,7 @@
 
 ## 📌 Overview
 
-CropDoc AI empowers smallholder farmers with an intelligent, mobile-first tool that replaces the need to wait days for an agricultural extension officer. A farmer can photograph a diseased leaf, receive an instant diagnosis with pesticide recommendations, hear the advice spoken aloud in Telugu, check current mandi prices, and calculate expected crop profits — all from a basic Android smartphone.
+CropDoc AI empowers smallholder farmers with an intelligent, mobile-first tool that replaces the need to wait days for an agricultural extension officer. A farmer can photograph a diseased leaf, receive an instant diagnosis with pesticide recommendations, hear the advice spoken aloud in Telugu, check current mandi prices, and calculate expected crop profits. All from a basic Android smartphone.
 
 > **"From field to diagnosis in under 2 seconds."**
 
@@ -31,14 +31,14 @@ CropDoc AI empowers smallholder farmers with an intelligent, mobile-first tool t
 |---|---|
 | 🔬 **Disease Detection** | Upload leaf photo → EfficientNetB0 CNN classifies 15 disease classes across Tomato, Potato, and Pepper with 92%+ accuracy |
 | 💊 **Treatment Advice** | Disease-specific pesticide, fertilizer, and immediate action recommendations from a curated agronomic knowledge base |
-| 🔊 **Telugu Voice Output** | Diagnosis and treatment spoken aloud in Telugu via gTTS — accessible for low-literacy farmers |
+| 🔊 **Telugu Voice Output** | Diagnosis and treatment spoken aloud in Telugu via gTTS - accessible for low-literacy farmers |
 | 🌤 **Weather Advisory** | Real-time weather via OpenWeather API with automated farming advice rules (delay spray before rain, fungal risk alerts, etc.) |
 | 📊 **Market Prices** | Live APMC mandi prices from data.gov.in with fallback reference data when government API is unavailable |
 | 🧮 **Profit Calculator** | Input land, yield, cost, and market price to compute net profit, ROI, and break-even price per kg |
 | 📋 **Prediction History** | Every diagnosis saved per user in Supabase PostgreSQL with severity, confidence, and treatment details |
-| 🔐 **Secure Auth** | Supabase Auth with JWT verification via JWKS (RS256) — email confirmation, auto token refresh |
+| 🔐 **Secure Auth** | Supabase Auth with JWT verification via JWKS (RS256) - email confirmation, auto token refresh |
 | 🌐 **Multilingual** | English, Hindi, and Telugu UI support |
-| 📱 **PWA — Installable** | Installable on Android from Chrome browser — no Play Store required |
+| 📱 **PWA — Installable** | Installable on Android from Chrome browser - no Play Store required |
 
 ---
 
@@ -462,7 +462,7 @@ curl http://127.0.0.1:8000/jwks-test
 
 - Mohanty, S.P., Hughes, D.P., Salathé, M. (2016). *Using Deep Learning for Image-Based Plant Disease Detection.* Frontiers in Plant Science.
 - Tan, M., & Le, Q. (2019). *EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks.* ICML 2019.
-- PlantVillage Dataset — https://www.kaggle.com/datasets/emmarex/plantdisease
+- PlantVillage Dataset - https://www.kaggle.com/datasets/emmarex/plantdisease
 
 ---
 
@@ -487,7 +487,7 @@ git push origin feature/add-rice-diseases
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — free to use, modify, and distribute.
+This project is licensed under the **MIT License**. Free to use, modify, and distribute.
 
 Built with ❤️ for Indian farmers 🇮🇳
 
